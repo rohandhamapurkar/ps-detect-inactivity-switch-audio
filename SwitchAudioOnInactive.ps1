@@ -1,28 +1,26 @@
 # PowerShell Audio Device Switcher with Inactivity Detection
 # Switches to a specified audio device after a period of inactivity
+# Usage: .\SwitchAudio.ps1 -TargetDeviceName "Audio Out Rear" -InactivitySeconds 15
+param(
+    [Parameter(Mandatory=$false)]
+    [string]$TargetDeviceName = "Audio Out Rear (High Definition Audio Device)",
+    
+    [Parameter(Mandatory=$false)]
+    [int]$InactivitySeconds = 15
+)
 
 # First, check if the module is installed
 if (-not (Get-Module -ListAvailable -Name AudioDeviceCmdlets)) {
-    Write-Host "The AudioDeviceCmdlets module is required but not installed." -ForegroundColor Red
-    Write-Host "Would you like to install it now? (Y/N)" -ForegroundColor Yellow
-    $response = Read-Host
-    
-    if ($response -eq 'Y' -or $response -eq 'y') {
-        try {
-            Write-Host "Installing AudioDeviceCmdlets module..." -ForegroundColor Cyan
-            Install-Module -Name AudioDeviceCmdlets -Force -Scope CurrentUser
-            Write-Host "Module installed successfully!" -ForegroundColor Green
-        }
-        catch {
-            Write-Host "Failed to install the module: $_" -ForegroundColor Red
-            Write-Host "Please run PowerShell as Administrator and try again, or install the module manually." -ForegroundColor Yellow
-            Write-Host "You can install it manually by running: Install-Module -Name AudioDeviceCmdlets" -ForegroundColor Yellow
-            exit
-        }
+    try {
+        Write-Host "Installing AudioDeviceCmdlets module..." -ForegroundColor Cyan
+        Install-Module -Name AudioDeviceCmdlets -Force -Scope CurrentUser
+        Write-Host "Module installed successfully!" -ForegroundColor Green
     }
-    else {
-        Write-Host "Module installation declined. Exiting script." -ForegroundColor Yellow
-        exit
+    catch {
+        Write-Host "Failed to install the module: $_" -ForegroundColor Red
+        Write-Host "Please run PowerShell as Administrator and try again, or install the module manually." -ForegroundColor Yellow
+        Write-Host "You can install it manually by running: Install-Module -Name AudioDeviceCmdlets" -ForegroundColor Yellow
+        exit 1
     }
 }
 
@@ -57,29 +55,15 @@ public class UserInactivity {
 }
 "@
 
-# Function to show all playback devices
-function Show-AudioDevices {
-    Write-Host "`nAvailable Audio Playback Devices:" -ForegroundColor Cyan
-    Write-Host "--------------------------------" -ForegroundColor Cyan
-    
+# Function to get all playback devices and find target by name
+function Get-AudioDevices {
     try {
-        $index = 1
         $devices = Get-AudioDevice -List | Where-Object { $_.Type -eq "Playback" }
-        
-        foreach ($device in $devices) {
-            if ($device.Default) {
-                Write-Host "$index. $($device.Name) [CURRENT DEFAULT]" -ForegroundColor Green
-            } else {
-                Write-Host "$index. $($device.Name)" -ForegroundColor White
-            }
-            $index++
-        }
-        
         return $devices
     }
     catch {
         Write-Host "Error retrieving audio devices: $_" -ForegroundColor Red
-        exit
+        exit 1
     }
 }
 
@@ -87,23 +71,12 @@ function Show-AudioDevices {
 function Set-AudioDeviceDefault {
     param (
         [Parameter(Mandatory=$true)]
-        [int]$Index,
-        [Parameter(Mandatory=$true)]
-        [array]$Devices
+        [int]$DeviceIndex
     )
     
-    if ($Index -lt 1 -or $Index -gt $Devices.Count) {
-        Write-Host "Invalid device index. Please select a number between 1 and $($Devices.Count)" -ForegroundColor Red
-        return $false
-    }
-    
-    $selectedDevice = $Devices[$Index - 1]
-    
-    Write-Host "Switching to: $($selectedDevice.Name)" -ForegroundColor Yellow
-    
     try {
-        Set-AudioDevice -Index $selectedDevice.Index
-        Write-Host "Successfully switched to: $($selectedDevice.Name)" -ForegroundColor Green
+        Set-AudioDevice -Index $DeviceIndex
+        Write-Host "Successfully switched to device with index: $DeviceIndex" -ForegroundColor Green
         return $true
     }
     catch {
@@ -117,17 +90,16 @@ function Start-InactivityMonitor {
     param (
         [Parameter(Mandatory=$true)]
         [int]$TargetDeviceIndex,
-        [Parameter(Mandatory=$true)]
-        [array]$Devices,
         [Parameter(Mandatory=$false)]
         [int]$InactivityThresholdSeconds = 15
     )
     
     $inactivityThresholdMs = $InactivityThresholdSeconds * 1000
-    $defaultDevice = ($Devices | Where-Object { $_.Default }).Index
+    $devices = Get-AudioDevices
+    $targetDevice = $devices | Where-Object { $_.Index -eq $TargetDeviceIndex }
     
     Write-Host "`nInactivity Monitor Started" -ForegroundColor Cyan
-    Write-Host "Target Device: $($Devices[$TargetDeviceIndex - 1].Name)" -ForegroundColor Cyan
+    Write-Host "Target Device: $($targetDevice.Name)" -ForegroundColor Cyan
     Write-Host "Inactivity Threshold: $InactivityThresholdSeconds seconds" -ForegroundColor Cyan
     Write-Host "Press Ctrl+C to stop monitoring" -ForegroundColor Yellow
     
@@ -136,18 +108,17 @@ function Start-InactivityMonitor {
     try {
         while ($true) {
             $idleTime = [UserInactivity]::GetIdleTime()
-            $currentDefaultDeviceIndex = ($Devices | Where-Object { $_.Default }).Index
+            $currentDevice = Get-AudioDevice -Playback
 
             # Display current status with a progress bar
             Write-Progress -Activity "Monitoring Inactivity" -Status "Idle Time: $([math]::Round($idleTime/1000, 1)) seconds" -PercentComplete ([math]::Min(100, ($idleTime / $inactivityThresholdMs * 100)))
             
             if ($idleTime -ge $inactivityThresholdMs -and -not $switchedToTarget) {
                 # Switch to target device after inactivity threshold
-                $currentDevice = Get-AudioDevice -Playback
                 Write-Host "`n[$(Get-Date -Format 'HH:mm:ss')] Inactivity threshold reached ($InactivityThresholdSeconds seconds)" -ForegroundColor Yellow
                 
-                if ($currentDevice.Index -ne $Devices[$TargetDeviceIndex - 1].Index) {
-                    $result = Set-AudioDeviceDefault -Index $TargetDeviceIndex -Devices $Devices
+                if ($currentDevice.Index -ne $TargetDeviceIndex) {
+                    $result = Set-AudioDeviceDefault -DeviceIndex $TargetDeviceIndex
                     if ($result) {
                         $switchedToTarget = $true
                     }
@@ -176,17 +147,26 @@ function Start-InactivityMonitor {
 Clear-Host
 Write-Host "===== Audio Device Switcher with Inactivity Detection =====" -ForegroundColor Cyan
 
-# Get and display available audio devices
-$devices = Show-AudioDevices
+# Get all audio devices
+$allDevices = Get-AudioDevices
 
-# Let user select a target device (to switch to after inactivity)
-$targetDeviceSelection = Read-Host "`nEnter the number of the device you want to switch to after inactivity"
-$inactivityThreshold = Read-Host "Enter inactivity threshold in seconds (default is 15)"
+# Find the target device by name
+$targetDevice = $allDevices | Where-Object { $_.Name -like "*$TargetDeviceName*" }
 
-# Use default if no value entered
-if ([string]::IsNullOrWhiteSpace($inactivityThreshold)) {
-    $inactivityThreshold = 15
+if ($null -eq $targetDevice) {
+    Write-Host "No device found matching name: '$TargetDeviceName'" -ForegroundColor Red
+    Write-Host "Available devices:"
+    $allDevices | ForEach-Object { Write-Host " - $($_.Name)" }
+    exit 1
 }
 
+# If multiple matches, take the first one
+if ($targetDevice -is [array]) {
+    Write-Host "Multiple devices found matching '$TargetDeviceName'. Using the first match: $($targetDevice[0].Name)" -ForegroundColor Yellow
+    $targetDevice = $targetDevice[0]
+}
+
+Write-Host "Found target device: $($targetDevice.Name) (Index: $($targetDevice.Index))" -ForegroundColor Green
+
 # Start monitoring for inactivity
-Start-InactivityMonitor -TargetDeviceIndex $targetDeviceSelection -Devices $devices -InactivityThresholdSeconds $inactivityThreshold
+Start-InactivityMonitor -TargetDeviceIndex $targetDevice.Index -InactivityThresholdSeconds $InactivitySeconds
