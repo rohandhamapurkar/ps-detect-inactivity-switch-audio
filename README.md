@@ -36,7 +36,7 @@ Perfect for users who want to:
 
 ### Basic Usage
 
-Run the script with default parameters (switches to "Audio Out Rear" after 15 seconds of inactivity):
+Run the script with default parameters (switches to "Audio Out Rear" after 60 seconds of inactivity):
 
 ```powershell
 .\SwitchAudio.ps1
@@ -53,7 +53,7 @@ Specify a different target device and/or inactivity threshold:
 ### Parameters
 
 - `-TargetDeviceName`: The name of the audio device to switch to (partial matches work)
-- `-InactivitySeconds`: Number of seconds of inactivity before switching (default: 15)
+- `-InactivitySeconds`: Number of seconds of inactivity before switching (default: 60)
 
 ## Troubleshooting
 

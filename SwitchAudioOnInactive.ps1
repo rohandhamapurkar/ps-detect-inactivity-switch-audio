@@ -6,7 +6,7 @@ param(
     [string]$TargetDeviceName = "Audio Out Rear (High Definition Audio Device)",
     
     [Parameter(Mandatory=$false)]
-    [int]$InactivitySeconds = 15
+    [int]$InactivitySeconds = 60
 )
 
 # First, check if the module is installed
